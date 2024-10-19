@@ -82,10 +82,9 @@ if __name__ == '__main__':
                 show_enter_button.click(swap_buttons, outputs=[show_enter_button, show_upload_button])
 
             with gr.Group():
-                with gr.Row(variant='panel'):
-                    generate_btn = gr.Button("Generate", variant='primary', scale=1)
-                    converted_voice = gr.Audio(label='Converted Voice', scale=5, show_share_button=False)
-                    output_format = gr.Dropdown(['mp3', 'flac', 'wav'], value='mp3', label='File Format', scale=0.1, allow_custom_value=False, filterable=False)
+                generate_btn = gr.Button("Generate", variant='primary', scale=1)
+                converted_voice = gr.Audio(label='Converted Voice', scale=5, show_share_button=False)
+                output_format = gr.Dropdown(['mp3', 'flac', 'wav'], value='mp3', label='File Format', scale=0.1, allow_custom_value=False, filterable=False)
 
             with gr.Accordion('Voice Conversion Settings', open=False):
                 with gr.Group():
