@@ -82,7 +82,7 @@ if __name__ == '__main__':
                 show_enter_button.click(swap_buttons, outputs=[show_enter_button, show_upload_button])
 
             with gr.Group():
-                with gr.Row():
+                with gr.Row(equal_height=True):
                     generate_btn = gr.Button("Generate", variant="primary", scale=2)
                     converted_voice = gr.Audio(label='Converted Voice', scale=9)
                     output_format = gr.Dropdown(['mp3', 'flac', 'wav'], value='mp3', label='File Format', allow_custom_value=False, filterable=False, scale=1)
