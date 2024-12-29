@@ -4,54 +4,91 @@ import urllib.request
 import zipfile
 import gdown
 import gradio as gr
-
 from main import song_cover_pipeline
 from audio_effects import add_audio_effects
 from modules.model_management import ignore_files, update_models_list, extract_zip, download_from_url, upload_zip_model, upload_separate_files
 from modules.ui_updates import show_hop_slider, update_f0_method, update_button_text, update_button_text_voc, update_button_text_inst, swap_visibility, swap_buttons
 from modules.file_processing import process_file_upload
+from audio_separator.separator import Separator
+import yt_dlp
+import re
+import random
+from scipy.io.wavfile import write
+from scipy.io.wavfile import read
+import numpy as np
+
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
 output_dir = os.path.join(BASE_DIR, 'song_output')
+uvr_dir = os.path.join(BASE_DIR, 'uvr_output')
+
+separator = Separator(output_dir=uvr_dir)
 
 
-warning = sys.argv[1]
 
-if warning == 'True':
-    warning = True
-elif warning == 'False':
-    warning = False
+UVR_5_MODELS = [
+    {"model_name": "BS-Roformer-Viperx-1297", "checkpoint": "model_bs_roformer_ep_317_sdr_12.9755.ckpt"},
+    {"model_name": "MDX23C-InstVoc HQ 2", "checkpoint": "MDX23C-8KFFT-InstVoc_HQ_2.ckpt"},
+    {"model_name": "Kim Vocal 2", "checkpoint": "Kim_Vocal_2.onnx"},
+    {"model_name": "5_HP-Karaoke", "checkpoint": "5_HP-Karaoke-UVR.pth"},
+    {"model_name": "UVR-DeNoise by FoxJoy", "checkpoint": "UVR-DeNoise.pth"},
+    {"model_name": "UVR-DeEcho-DeReverb by FoxJoy", "checkpoint": "UVR-DeEcho-DeReverb.pth"},
+]
+
+def inf_handler(audio, model_name): 
+    model_found = False
+    for model_info in UVR_5_MODELS:
+        if model_info["model_name"] == model_name:
+            separator.load_model(model_info["checkpoint"])
+            model_found = True
+            break
+    if not model_found:
+        separator.load_model()
+    output_names = {
+    "Vocals": "vocals_output",
+    "Instrumental": "instrumental_output",
+}
+output_files = separator.separate(audio, output_names)
+    vocals = "vocals_output.wav"
+    inst = "instrumental_output.wav"
+    return vocals, inst
+
+
+def download_audio(url):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': 'ytdl/%(title)s.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'wav',
+            'preferredquality': '192',
+        }],
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info_dict = ydl.extract_info(url, download=True)
+        file_path = ydl.prepare_filename(info_dict).rsplit('.', 1)[0] + '.wav'
+        sample_rate, audio_data = read(file_path)
+        audio_array = np.asarray(audio_data, dtype=np.int16)
+
+        return sample_rate, audio_array
+
+
+def uvr_inference(audio, model_name):
+    output_data = inf_handler(audio, model_name)
+    vocals = "vocals_output.wav"
+    inst = "instrumental_output.wav"
+    return vocals, inst
 
 
 if __name__ == '__main__':
     voice_models = ignore_files(rvc_models_dir)
 
-    with gr.Blocks(
-        title="CoverGen Lite - Politrees",
-        css="footer{display:none !important}",
-        theme=gr.themes.Soft(
-            primary_hue="green",
-            secondary_hue="green",
-            neutral_hue="neutral",
-            spacing_size="sm",
-            radius_size="lg",
-        )) as app:
+    with gr.Blocks(title="CoverGen Lite - Politrees",theme=gr.themes.Ocean()) as app:
         
-        if warning:
-            with gr.Column(variant='panel'):
-                gr.HTML("<center><h2>This space is running too slow due to a weak server, so I made a Google Colab notebook to work faster with this interface: <a href='https://colab.research.google.com/drive/1HzuPgICRrjqUWQWb5Zn-l07m099-n-Nr'>Google Colab Notebook</a>.</h2></center>")
         
-        with gr.Tab("Welcome/Contacts"):
-            gr.HTML("<center><h1>Welcome to CoverGen Lite - Politrees</h1></center>")
-            with gr.Column(variant='panel'):
-                gr.HTML("<center><h2><a href='https://t.me/Politrees2'>Telegram</a></h2></center>")
-                gr.HTML("<center><h2><a href='https://t.me/pol1trees'>Telegram Channel</a></h2></center>")
-                gr.HTML("<center><h2><a href='https://t.me/+GMTP7hZqY0E4OGRi'>Telegram Chat</a></h2></center>")
-            with gr.Column(variant='panel'):
-                gr.HTML("<center><h2><a href='https://www.youtube.com/@Politrees?sub_confirmation=1'>YouTube</a></h2></center>")
-                gr.HTML("<center><h2><a href='https://github.com/Bebra777228'>GitHub</a></h2></center>")
-
         with gr.Tab("Voice Conversion"):
             with gr.Row(equal_height=False):
                 with gr.Column(scale=1, variant='panel'):
@@ -61,32 +98,32 @@ if __name__ == '__main__':
                     with gr.Group():
                         pitch = gr.Slider(-24, 24, value=0, step=0.5, label='Pitch Adjustment', info='-24 - male voice || 24 - female voice')
 
-                with gr.Column(scale=2, variant='panel'):
-                    with gr.Column() as upload_file:
-                        with gr.Group():
-                            local_file = gr.Audio(label='Audio File', interactive=False, show_download_button=False, show_share_button=False)
-                            uploaded_file = gr.UploadButton(label='Upload Audio File', file_types=['audio'], variant='primary')
+                local_file = gr.Audio(label='Audio File', interactive=False, show_download_button=False, show_share_button=False)
+                with gr.Accordion("Vocal Separator (UVR)"):
+                    uvr5_audio_file = gr.Audio(label="Audio File",type="filepath")
+                    with gr.Accordion("Separation by Link", open = False):
+                        with gr.Row():
+                            roformer_link = gr.Textbox(
+                                label = "Link",
+                                placeholder = "Paste the link here",
+                                interactive = True
+                            )
+                        with gr.Row():
+                            gr.Markdown("You can paste the link to the video/audio from many sites, check the complete list [here](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)"
+                        with gr.Row():
+                            roformer_download_button = gr.Button(
+                                "Download!",
+                                variant = "primary"
+                            )
+                    roformer_download_button.click(download_audio, [roformer_link], [uvr5_audio_file])
 
-                    with gr.Column(visible=False) as enter_local_file:
-                        song_input = gr.Text(label='Local file path', info='Enter the full path to the local file.')
-
-                    with gr.Column():
-                        show_upload_button = gr.Button('Uploading a file from your device', visible=False)
-                        show_enter_button = gr.Button('Entering the path to the local file')
-                    
-                uploaded_file.upload(process_file_upload, inputs=[uploaded_file], outputs=[song_input, local_file])
-                uploaded_file.upload(update_button_text, outputs=[uploaded_file])
-                show_upload_button.click(swap_visibility, outputs=[upload_file, enter_local_file, song_input, local_file])
-                show_enter_button.click(swap_visibility, outputs=[enter_local_file, upload_file, song_input, local_file])
-                show_upload_button.click(swap_buttons, outputs=[show_upload_button, show_enter_button])
-                show_enter_button.click(swap_buttons, outputs=[show_enter_button, show_upload_button])
-
-            with gr.Group():
-                with gr.Row(equal_height=True):
-                    generate_btn = gr.Button("Generate", variant="primary", scale=2)
-                    converted_voice = gr.Audio(label='Converted Voice', scale=9)
-                    output_format = gr.Dropdown(['mp3', 'flac', 'wav'], value='mp3', label='File Format', allow_custom_value=False, filterable=False, scale=1)
-
+                    with gr.Row():
+                        uvr5_model = gr.Dropdown(label="Model", choices=[model["model_name"] for model in UVR_5_MODELS])
+                    uvr5_button = gr.Button("Separate Vocals", variant="primary",)
+                    uvr5_output_inst = gr.Audio(type="filepath", label="Output Instruental",)
+            uvr5_button.click(uvr_inference, [uvr5_audio_file, uvr5_model], [local_file, uvr5_output_inst])
+    
+            
             with gr.Accordion('Voice Conversion Settings', open=False):
                 with gr.Group():
                     with gr.Column(variant='panel'):
@@ -103,10 +140,17 @@ if __name__ == '__main__':
                         filter_radius = gr.Slider(0, 7, value=3, step=1, label='Filter Radius', info='Manages the radius of filtering the pitch analysis results. If the filtering value is three or higher, median filtering is applied to reduce breathing noise in the audio recording.')
                         rms_mix_rate = gr.Slider(0, 1, value=0.25, step=0.01, label='RMS Mix Rate', info='Controls the extent to which the output signal is mixed with its envelope. A value close to 1 increases the use of the envelope of the output signal, which may improve sound quality.')
                         protect = gr.Slider(0, 0.5, value=0.33, step=0.01, label='Consonant Protection', info='Controls the extent to which individual consonants and breathing sounds are protected from electroacoustic breaks and other artifacts. A maximum value of 0.5 provides the most protection, but may increase the indexing effect, which may negatively impact sound quality. Reducing the value may decrease the extent of protection, but reduce the indexing effect.')
+                    output_format = gr.Dropdown(['mp3', 'flac', 'wav'], value='mp3', label='File Format', allow_custom_value=False, filterable=False, scale=1)
 
+
+            with gr.Group():
+                with gr.Row(equal_height=True):
+                    generate_btn = gr.Button("Generate", variant="primary", scale=2)
+            converted_voice = gr.Audio(label='Converted Voice', scale=9)
+                    
             ref_btn.click(update_models_list, None, outputs=rvc_model)
             generate_btn.click(song_cover_pipeline,
-                              inputs=[song_input, rvc_model, pitch, index_rate, filter_radius, rms_mix_rate, f0_method, crepe_hop_length, protect, output_format],
+                              inputs=[local_file, rvc_model, pitch, index_rate, filter_radius, rms_mix_rate, f0_method, crepe_hop_length, protect, output_format],
                               outputs=[converted_voice])
 
         with gr.Tab('Merge/Process'):
